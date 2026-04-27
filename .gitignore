@@ -1,0 +1,6 @@
+echo node_modules/ > .gitignore
+echo .env >> .gitignore
+echo .env.local >> .gitignore
+echo .env.production >> .gitignore
+echo .DS_Store >> .gitignore
+echo *.log >> .gitignore
