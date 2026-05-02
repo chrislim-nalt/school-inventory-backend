@@ -1,18 +1,15 @@
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+// Initialize Resend with API key
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Send OTP email with dynamic school information
+// Send OTP email using Resend
 exports.sendOTP = async (email, otp, name, schoolCode = null, schoolName = null) => {
   try {
     const displaySchoolName = schoolName || "Your School";
     const displaySchoolCode = schoolCode || "Not available";
+    
+    const fromEmail = process.env.EMAIL_FROM || "onboarding@resend.dev";
     
     const schoolInfoSection = schoolCode ? `
       <div style="background-color: #e8f4e8; padding: 15px; border-radius: 8px; margin: 20px 0; text-align: center; border: 1px solid #4caf50;">
@@ -25,159 +22,184 @@ exports.sendOTP = async (email, otp, name, schoolCode = null, schoolName = null)
       </div>
     ` : '';
 
-    const mailOptions = {
-      from: `"${displaySchoolName} Inventory" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: schoolCode ? `🏫 Welcome to ${displaySchoolName} Inventory System` : `🔐 Your Login Verification Code - ${displaySchoolName}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 20px; background-color: #f4f4f4; border-radius: 10px;">
-          <div style="text-align: center; background-color: #1e3a5f; padding: 20px; border-radius: 10px 10px 0 0;">
-            <h1 style="color: white; margin: 0;">🏫 ${displaySchoolName}</h1>
-            <p style="color: #cbd5e1; margin: 5px 0 0;">Inventory Management System</p>
+    const subject = schoolCode 
+      ? `🏫 Welcome to ${displaySchoolName} Inventory System`
+      : `🔐 Your Login Verification Code - ${displaySchoolName}`;
+
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 20px; background-color: #f4f4f4; border-radius: 10px;">
+        <div style="text-align: center; background-color: #1e3a5f; padding: 20px; border-radius: 10px 10px 0 0;">
+          <h1 style="color: white; margin: 0;">🏫 ${displaySchoolName}</h1>
+          <p style="color: #cbd5e1; margin: 5px 0 0;">Inventory Management System</p>
+        </div>
+        
+        <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px;">
+          <h2 style="color: #1e3a5f; margin-top: 0;">Hello ${name || "User"}!</h2>
+          
+          ${schoolCode ? `
+            <p style="color: #333; font-size: 16px;">Welcome to the system! You have successfully registered <strong>${displaySchoolName}</strong>.</p>
+            <p style="color: #333; font-size: 16px;">Please find your school information below:</p>
+          ` : `
+            <p style="color: #333; font-size: 16px;">You've requested to log in to your account at <strong>${displaySchoolName}</strong>. Please use the verification code below to complete your login.</p>
+          `}
+          
+          ${schoolInfoSection}
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <div style="font-size: 42px; font-weight: bold; letter-spacing: 10px; color: #1e3a5f; background-color: #f0f4f8; padding: 15px; border-radius: 8px; font-family: monospace;">
+              ${otp}
+            </div>
+            <p style="color: #555; font-size: 12px; margin-top: 10px;">This code expires in <strong>10 minutes</strong></p>
           </div>
           
-          <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px;">
-            <h2 style="color: #1e3a5f; margin-top: 0;">Hello ${name || "User"}!</h2>
-            
-            ${schoolCode ? `
-              <p style="color: #333; font-size: 16px;">Welcome to the system! You have successfully registered <strong>${displaySchoolName}</strong>.</p>
-              <p style="color: #333; font-size: 16px;">Please find your school information below:</p>
-            ` : `
-              <p style="color: #333; font-size: 16px;">You've requested to log in to your account at <strong>${displaySchoolName}</strong>. Please use the verification code below to complete your login.</p>
-            `}
-            
-            ${schoolInfoSection}
-            
-            <div style="text-align: center; margin: 30px 0;">
-              <div style="font-size: 42px; font-weight: bold; letter-spacing: 10px; color: #1e3a5f; background-color: #f0f4f8; padding: 15px; border-radius: 8px; font-family: monospace;">
-                ${otp}
-              </div>
-              <p style="color: #555; font-size: 12px; margin-top: 10px;">This code expires in <strong>10 minutes</strong></p>
+          ${schoolCode ? `
+            <div style="background-color: #fff3e0; padding: 12px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ff9800;">
+              <p style="margin: 0; color: #e65100; font-size: 13px;">
+                💡 <strong>Tip:</strong> Save this email or write down your school code. You'll need it when logging in and sharing with other staff members.
+              </p>
             </div>
-            
-            ${schoolCode ? `
-              <div style="background-color: #fff3e0; padding: 12px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ff9800;">
-                <p style="margin: 0; color: #e65100; font-size: 13px;">
-                  💡 <strong>Tip:</strong> Save this email or write down your school code. You'll need it when logging in and sharing with other staff members.
-                </p>
-              </div>
-            ` : `
-              <p style="color: #555; font-size: 14px;">If you didn't request this, please ignore this email or contact your system administrator.</p>
-            `}
-            
-            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
-            <p style="color: #888; font-size: 12px; text-align: center;">
-              This is an automated message from ${displaySchoolName} Inventory System.<br>
-              Please do not reply to this email.
-            </p>
-          </div>
+          ` : `
+            <p style="color: #555; font-size: 14px;">If you didn't request this, please ignore this email or contact your system administrator.</p>
+          `}
+          
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+          <p style="color: #888; font-size: 12px; text-align: center;">
+            This is an automated message from ${displaySchoolName} Inventory System.<br>
+            Please do not reply to this email.
+          </p>
         </div>
-      `,
-    };
+      </div>
+    `;
 
-    await transporter.sendMail(mailOptions);
-    console.log(`✅ Email sent to ${email} for ${displaySchoolName}`);
+    const { data, error } = await resend.emails.send({
+      from: `${displaySchoolName} Inventory <${fromEmail}>`,
+      to: [email],
+      subject: subject,
+      html: htmlContent,
+      reply_to: process.env.EMAIL_USER || "noreply@resend.com",
+    });
+
+    if (error) {
+      console.error("❌ Resend error:", error);
+      return false;
+    }
+
+    console.log(`✅ Email sent to ${email} - ID: ${data.id}`);
     return true;
   } catch (error) {
-    console.error("Email sending error:", error);
+    console.error("❌ Email sending error:", error.message);
     return false;
   }
 };
 
-// Send password reset OTP with dynamic school name
+// Send password reset OTP
 exports.sendPasswordResetOTP = async (email, otp, name, schoolName = null) => {
   try {
     const displaySchoolName = schoolName || "Your School";
-    
-    const mailOptions = {
-      from: `"${displaySchoolName} Inventory" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: `🔐 Password Reset Request - ${displaySchoolName}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 20px; background-color: #f4f4f4; border-radius: 10px;">
-          <div style="text-align: center; background-color: #1e3a5f; padding: 20px; border-radius: 10px 10px 0 0;">
-            <h1 style="color: white; margin: 0;">🏫 ${displaySchoolName}</h1>
-            <p style="color: #cbd5e1; margin: 5px 0 0;">Inventory Management System</p>
+    const fromEmail = process.env.EMAIL_FROM || "onboarding@resend.dev";
+
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 20px; background-color: #f4f4f4; border-radius: 10px;">
+        <div style="text-align: center; background-color: #1e3a5f; padding: 20px; border-radius: 10px 10px 0 0;">
+          <h1 style="color: white; margin: 0;">🏫 ${displaySchoolName}</h1>
+          <p style="color: #cbd5e1; margin: 5px 0 0;">Inventory Management System</p>
+        </div>
+        
+        <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px;">
+          <h2 style="color: #1e3a5f; margin-top: 0;">Hello ${name || "User"}!</h2>
+          <p style="color: #333; font-size: 16px;">You requested to reset your password for <strong>${displaySchoolName}</strong>. Please use the verification code below to proceed.</p>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <div style="font-size: 42px; font-weight: bold; letter-spacing: 10px; color: #1e3a5f; background-color: #f0f4f8; padding: 15px; border-radius: 8px; font-family: monospace;">
+              ${otp}
+            </div>
+            <p style="color: #555; font-size: 12px; margin-top: 10px;">This code expires in <strong>10 minutes</strong></p>
           </div>
           
-          <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px;">
-            <h2 style="color: #1e3a5f; margin-top: 0;">Hello ${name || "User"}!</h2>
-            <p style="color: #333; font-size: 16px;">You requested to reset your password for <strong>${displaySchoolName}</strong>. Please use the verification code below to proceed.</p>
-            
-            <div style="text-align: center; margin: 30px 0;">
-              <div style="font-size: 42px; font-weight: bold; letter-spacing: 10px; color: #1e3a5f; background-color: #f0f4f8; padding: 15px; border-radius: 8px; font-family: monospace;">
-                ${otp}
-              </div>
-              <p style="color: #555; font-size: 12px; margin-top: 10px;">This code expires in <strong>10 minutes</strong></p>
-            </div>
-            
-            <p style="color: #555; font-size: 14px;">If you didn't request this, please ignore this email.</p>
-            
-            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
-            <p style="color: #888; font-size: 12px; text-align: center;">
-              This is an automated message from ${displaySchoolName} Inventory System.
-            </p>
-          </div>
+          <p style="color: #555; font-size: 14px;">If you didn't request this, please ignore this email.</p>
+          
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+          <p style="color: #888; font-size: 12px; text-align: center;">
+            This is an automated message from ${displaySchoolName} Inventory System.
+          </p>
         </div>
-      `,
-    };
+      </div>
+    `;
 
-    await transporter.sendMail(mailOptions);
-    console.log(`✅ Password reset email sent to ${email} for ${displaySchoolName}`);
+    const { data, error } = await resend.emails.send({
+      from: `${displaySchoolName} Inventory <${fromEmail}>`,
+      to: [email],
+      subject: `🔐 Password Reset Request - ${displaySchoolName}`,
+      html: htmlContent,
+    });
+
+    if (error) {
+      console.error("❌ Resend error:", error);
+      return false;
+    }
+
+    console.log(`✅ Password reset email sent to ${email}`);
     return true;
   } catch (error) {
-    console.error("Email sending error:", error);
+    console.error("❌ Password reset email error:", error.message);
     return false;
   }
 };
 
-// Send school code recovery email with dynamic school name
+// Send school code recovery email
 exports.sendSchoolCodeRecovery = async (email, schoolName, schoolCode) => {
   try {
     const displaySchoolName = schoolName || "Your School";
-    
-    const mailOptions = {
-      from: `"${displaySchoolName} Inventory" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: `🏫 Your School Code - ${displaySchoolName}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 20px; background-color: #f4f4f4; border-radius: 10px;">
-          <div style="text-align: center; background-color: #1e3a5f; padding: 20px; border-radius: 10px 10px 0 0;">
-            <h1 style="color: white; margin: 0;">🏫 ${displaySchoolName}</h1>
-            <p style="color: #cbd5e1; margin: 5px 0 0;">Inventory Management System</p>
+    const fromEmail = process.env.EMAIL_FROM || "onboarding@resend.dev";
+
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 20px; background-color: #f4f4f4; border-radius: 10px;">
+        <div style="text-align: center; background-color: #1e3a5f; padding: 20px; border-radius: 10px 10px 0 0;">
+          <h1 style="color: white; margin: 0;">🏫 ${displaySchoolName}</h1>
+          <p style="color: #cbd5e1; margin: 5px 0 0;">Inventory Management System</p>
+        </div>
+        
+        <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px;">
+          <h2 style="color: #1e3a5f; margin-top: 0;">School Code Recovery</h2>
+          
+          <p style="color: #333; font-size: 16px;">You requested your school code for <strong>${displaySchoolName}</strong>.</p>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <div style="font-size: 28px; font-weight: bold; letter-spacing: 5px; color: #1e3a5f; background-color: #f0f4f8; padding: 15px; border-radius: 8px; font-family: monospace;">
+              ${schoolCode}
+            </div>
           </div>
           
-          <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px;">
-            <h2 style="color: #1e3a5f; margin-top: 0;">School Code Recovery</h2>
-            
-            <p style="color: #333; font-size: 16px;">You requested your school code for <strong>${displaySchoolName}</strong>.</p>
-            
-            <div style="text-align: center; margin: 30px 0;">
-              <div style="font-size: 28px; font-weight: bold; letter-spacing: 5px; color: #1e3a5f; background-color: #f0f4f8; padding: 15px; border-radius: 8px; font-family: monospace;">
-                ${schoolCode}
-              </div>
-            </div>
-            
-            <div style="background-color: #e8f4e8; padding: 12px; border-radius: 8px; margin: 20px 0;">
-              <p style="margin: 0; color: #2e7d32; font-size: 13px;">
-                🔑 Share this code with other staff members so they can join your school.
-              </p>
-            </div>
-            
-            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
-            <p style="color: #888; font-size: 12px; text-align: center;">
-              This is an automated message from ${displaySchoolName} Inventory System.
+          <div style="background-color: #e8f4e8; padding: 12px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 0; color: #2e7d32; font-size: 13px;">
+              🔑 Share this code with other staff members so they can join your school.
             </p>
           </div>
+          
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+          <p style="color: #888; font-size: 12px; text-align: center;">
+            This is an automated message from ${displaySchoolName} Inventory System.
+          </p>
         </div>
-      `,
-    };
+      </div>
+    `;
 
-    await transporter.sendMail(mailOptions);
-    console.log(`✅ School code sent to ${email} for ${displaySchoolName}`);
+    const { data, error } = await resend.emails.send({
+      from: `${displaySchoolName} Inventory <${fromEmail}>`,
+      to: [email],
+      subject: `🏫 Your School Code - ${displaySchoolName}`,
+      html: htmlContent,
+    });
+
+    if (error) {
+      console.error("❌ Resend error:", error);
+      return false;
+    }
+
+    console.log(`✅ School code sent to ${email}`);
     return true;
   } catch (error) {
-    console.error("Email sending error:", error);
+    console.error("❌ School code email error:", error.message);
     return false;
   }
 };
