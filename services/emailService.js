@@ -1,15 +1,28 @@
-const { Resend } = require("resend");
+const nodemailer = require("nodemailer");
 
-// Initialize Resend with API key
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Create transporter using Gmail SMTP
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
-// Send OTP email using Resend
+// Verify connection
+transporter.verify((error, success) => {
+  if (error) {
+    console.error("❌ Email transporter error:", error);
+  } else {
+    console.log("✅ Email transporter ready (Gmail)");
+  }
+});
+
+// Send OTP email
 exports.sendOTP = async (email, otp, name, schoolCode = null, schoolName = null) => {
   try {
     const displaySchoolName = schoolName || "Your School";
     const displaySchoolCode = schoolCode || "Not available";
-    
-    const fromEmail = process.env.EMAIL_FROM || "onboarding@resend.dev";
     
     const schoolInfoSection = schoolCode ? `
       <div style="background-color: #e8f4e8; padding: 15px; border-radius: 8px; margin: 20px 0; text-align: center; border: 1px solid #4caf50;">
@@ -71,20 +84,15 @@ exports.sendOTP = async (email, otp, name, schoolCode = null, schoolName = null)
       </div>
     `;
 
-    const { data, error } = await resend.emails.send({
-      from: `${displaySchoolName} Inventory <${fromEmail}>`,
-      to: [email],
+    const mailOptions = {
+      from: `"${displaySchoolName} Inventory" <${process.env.EMAIL_USER}>`,
+      to: email,
       subject: subject,
       html: htmlContent,
-      reply_to: process.env.EMAIL_USER || "noreply@resend.com",
-    });
+    };
 
-    if (error) {
-      console.error("❌ Resend error:", error);
-      return false;
-    }
-
-    console.log(`✅ Email sent to ${email} - ID: ${data.id}`);
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`✅ Email sent to ${email} - Message ID: ${info.messageId}`);
     return true;
   } catch (error) {
     console.error("❌ Email sending error:", error.message);
@@ -96,7 +104,6 @@ exports.sendOTP = async (email, otp, name, schoolCode = null, schoolName = null)
 exports.sendPasswordResetOTP = async (email, otp, name, schoolName = null) => {
   try {
     const displaySchoolName = schoolName || "Your School";
-    const fromEmail = process.env.EMAIL_FROM || "onboarding@resend.dev";
 
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 20px; background-color: #f4f4f4; border-radius: 10px;">
@@ -126,18 +133,14 @@ exports.sendPasswordResetOTP = async (email, otp, name, schoolName = null) => {
       </div>
     `;
 
-    const { data, error } = await resend.emails.send({
-      from: `${displaySchoolName} Inventory <${fromEmail}>`,
-      to: [email],
+    const mailOptions = {
+      from: `"${displaySchoolName} Inventory" <${process.env.EMAIL_USER}>`,
+      to: email,
       subject: `🔐 Password Reset Request - ${displaySchoolName}`,
       html: htmlContent,
-    });
+    };
 
-    if (error) {
-      console.error("❌ Resend error:", error);
-      return false;
-    }
-
+    await transporter.sendMail(mailOptions);
     console.log(`✅ Password reset email sent to ${email}`);
     return true;
   } catch (error) {
@@ -150,7 +153,6 @@ exports.sendPasswordResetOTP = async (email, otp, name, schoolName = null) => {
 exports.sendSchoolCodeRecovery = async (email, schoolName, schoolCode) => {
   try {
     const displaySchoolName = schoolName || "Your School";
-    const fromEmail = process.env.EMAIL_FROM || "onboarding@resend.dev";
 
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 20px; background-color: #f4f4f4; border-radius: 10px;">
@@ -184,18 +186,14 @@ exports.sendSchoolCodeRecovery = async (email, schoolName, schoolCode) => {
       </div>
     `;
 
-    const { data, error } = await resend.emails.send({
-      from: `${displaySchoolName} Inventory <${fromEmail}>`,
-      to: [email],
+    const mailOptions = {
+      from: `"${displaySchoolName} Inventory" <${process.env.EMAIL_USER}>`,
+      to: email,
       subject: `🏫 Your School Code - ${displaySchoolName}`,
       html: htmlContent,
-    });
+    };
 
-    if (error) {
-      console.error("❌ Resend error:", error);
-      return false;
-    }
-
+    await transporter.sendMail(mailOptions);
     console.log(`✅ School code sent to ${email}`);
     return true;
   } catch (error) {
