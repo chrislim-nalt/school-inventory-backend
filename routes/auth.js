@@ -2,38 +2,44 @@ const express = require("express");
 const router = express.Router();
 const auth = require("../middleware/authMiddleware");
 const { 
-  register, 
-  verifyOtp, 
-  resendOtp, 
-  login, 
-  verifyLoginOtp,
-  getProfile,
-  updateProfile,
-  changePassword,
-  forgotPassword,
-  verifyResetOtp,
-  resetPassword,
-  forgotSchoolCode
+    login, 
+    adminLogin, 
+    getProfile, 
+    updateProfile, 
+    changePassword,
+    setupSecurity,
+    forgotPassword,
+    verifyResetOtp,
+    resetPassword,
+    forgotSchoolCode,
+    requestSchoolCodeRecovery,
+    verifySecurityAnswer,
+    requestPasswordReset,
+    verifyAndResetPassword
 } = require("../controllers/authController");
 
 // Public routes
-router.post("/register", register);
-router.post("/verify-otp", verifyOtp);
-router.post("/resend-otp", resendOtp);
 router.post("/login", login);
-router.post("/verify-login-otp", verifyLoginOtp);
+router.post("/admin-login", adminLogin);
 
-// Password reset routes
+// Password reset (with security questions)
 router.post("/forgot-password", forgotPassword);
 router.post("/verify-reset-otp", verifyResetOtp);
 router.post("/reset-password", resetPassword);
 
-// School code recovery
+// School code recovery (with security questions)
 router.post("/forgot-school-code", forgotSchoolCode);
+
+// NEW: Self-recovery endpoints
+router.post("/request-school-code-recovery", requestSchoolCodeRecovery);
+router.post("/verify-security-answer", verifySecurityAnswer);
+router.post("/request-password-reset", requestPasswordReset);
+router.post("/verify-and-reset-password", verifyAndResetPassword);
 
 // Protected routes
 router.get("/profile", auth, getProfile);
 router.put("/profile", auth, updateProfile);
 router.put("/change-password", auth, changePassword);
+router.post("/setup-security", auth, setupSecurity);
 
 module.exports = router;

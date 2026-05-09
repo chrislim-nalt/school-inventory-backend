@@ -2,492 +2,427 @@ const User = require("../models/User");
 const School = require("../models/School");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const { sendOTP, sendPasswordResetOTP, sendSchoolCodeRecovery } = require("../services/emailService");
 
-// Register - Step 1: Check school and send OTP with school info
-exports.register = async (req, res) => {
-    try {
-        const { name, email, password, schoolCode, schoolName } = req.body;
-        console.log("Register attempt:", { name, email, schoolCode, schoolName });
-        
-        let school = null;
-        
-        if (schoolCode) {
-            school = await School.findOne({ schoolCode: schoolCode.toUpperCase() });
-            if (!school) {
-                return res.status(404).json({ message: "School not found. Please check your school code." });
-            }
-            if (!school.isActive) {
-                return res.status(403).json({ message: "This school account is inactive." });
-            }
-        } else if (schoolName) {
-            const existingSchool = await School.findOne({ name: schoolName });
-            if (existingSchool) {
-                return res.status(400).json({ message: "School already registered. Please use your school code to join." });
-            }
-            
-            school = new School({
-                name: schoolName,
-                email: email,
-                isActive: true,
-            });
-            await school.save();
-            console.log("✅ New school created:", school.name, "| Code:", school.schoolCode);
-        } else {
-            return res.status(400).json({ message: "Please provide either school code or school name" });
-        }
-        
-        const existingUser = await User.findOne({ email, school: school._id });
-        if (existingUser) {
-            return res.status(400).json({ message: "User already registered in this school" });
-        }
-        
-        const userCount = await User.countDocuments({ school: school._id });
-        const role = userCount === 0 ? "admin" : "staff";
-        
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
-        
-        const user = new User({
-            name,
-            email,
-            password: hashedPassword,
-            school: school._id,
-            role,
-            isVerified: false,
-        });
-        await user.save();
-        console.log("✅ User created:", email, "| Role:", role);
-        
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        user.otp = otp;
-        user.otpExpires = new Date(Date.now() + 10 * 60000);
-        await user.save();
-        
-        // Send OTP with school code and name
-        const emailSent = await sendOTP(email, otp, name, school.schoolCode, school.name);
-        if (!emailSent) {
-            return res.status(500).json({ message: "Failed to send verification email" });
-        }
-        
-        console.log("📧 Welcome email with school code sent to:", email);
-        res.status(201).json({ 
-            message: "Verification code sent to your email",
-            schoolCode: school.schoolCode,
-            schoolName: school.name,
-            role: role
-        });
-    } catch (error) {
-        console.error("Register error:", error);
-        res.status(500).json({ message: error.message || "Server error" });
-    }
-};
+// Helper functions
+const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
-// Verify OTP - Step 2
-exports.verifyOtp = async (req, res) => {
-    try {
-        const { email, otp } = req.body;
-        console.log("Verifying OTP for:", email);
-        
-        const user = await User.findOne({ email }).populate("school", "name schoolCode");
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
-        
-        if (user.isVerified) {
-            return res.status(400).json({ message: "Email already verified" });
-        }
-        
-        if (!user.otp || user.otp !== otp) {
-            return res.status(401).json({ message: "Invalid verification code" });
-        }
-        
-        if (new Date() > user.otpExpires) {
-            return res.status(401).json({ message: "Code expired. Please register again." });
-        }
-        
-        user.isVerified = true;
-        user.otp = null;
-        user.otpExpires = null;
-        await user.save();
-        
-        console.log("✅ User verified:", email);
-        res.json({ 
-            message: "Email verified successfully! Please login.",
-            schoolName: user.school.name,
-            schoolCode: user.school.schoolCode,
-            role: user.role
-        });
-    } catch (error) {
-        console.error("Verify OTP error:", error);
-        res.status(500).json({ message: error.message || "Server error" });
-    }
-};
+// ==================== LOGIN FUNCTIONS ====================
 
-// Resend OTP - Updated with school info
-exports.resendOtp = async (req, res) => {
-    try {
-        const { email } = req.body;
-        console.log("Resending OTP for:", email);
-        
-        const user = await User.findOne({ email }).populate("school");
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
-        
-        if (user.isVerified) {
-            return res.status(400).json({ message: "Email already verified" });
-        }
-        
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        user.otp = otp;
-        user.otpExpires = new Date(Date.now() + 10 * 60000);
-        await user.save();
-        
-        // Send OTP with school info
-        await sendOTP(email, otp, user.name, user.school?.schoolCode, user.school?.name);
-        
-        console.log("📧 OTP resent to:", email);
-        res.json({ message: "New verification code sent" });
-    } catch (error) {
-        console.error("Resend error:", error);
-        res.status(500).json({ message: error.message || "Server error" });
-    }
-};
-
-// Login - Step 1
 exports.login = async (req, res) => {
     try {
         const { email, password, schoolCode } = req.body;
-        console.log("Login attempt for:", email, "School:", schoolCode);
         
         const school = await School.findOne({ schoolCode: schoolCode.toUpperCase() });
-        if (!school) {
-            return res.status(404).json({ message: "School not found. Please check your school code." });
-        }
-        
-        if (!school.isActive) {
-            return res.status(403).json({ message: "This school account is inactive." });
-        }
+        if (!school) return res.status(404).json({ message: "School not found" });
         
         const user = await User.findOne({ email, school: school._id });
-        if (!user) {
-            return res.status(401).json({ message: "Invalid email or password for this school" });
-        }
+        if (!user) return res.status(401).json({ message: "Invalid credentials" });
         
-        if (!user.isVerified) {
-            return res.status(401).json({ message: "Please verify your email first" });
-        }
-        
-        if (!user.isActive) {
-            return res.status(403).json({ message: "Your account has been deactivated" });
-        }
-        
-        if (school.subscription.endDate && new Date() > school.subscription.endDate) {
-            return res.status(403).json({ message: "School subscription has expired. Please renew." });
-        }
+        if (!user.isActive) return res.status(403).json({ message: "Account deactivated" });
         
         const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-            return res.status(401).json({ message: "Invalid email or password" });
-        }
+        if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
         
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        user.otp = otp;
-        user.otpExpires = new Date(Date.now() + 10 * 60000);
-        await user.save();
-        
-        // Send login OTP with school name
-        await sendOTP(email, otp, user.name, null, school.name);
-        
-        console.log("📧 Login OTP sent to:", email);
-        res.json({ 
-            message: "Verification code sent", 
-            email: email,
-            schoolName: school.name,
-            schoolCode: school.schoolCode
-        });
-    } catch (error) {
-        console.error("Login error:", error);
-        res.status(500).json({ message: error.message || "Server error" });
-    }
-};
-
-// Verify Login OTP - Step 2
-exports.verifyLoginOtp = async (req, res) => {
-    try {
-        const { email, otp, schoolCode } = req.body;
-        console.log("Verifying login OTP for:", email);
-        
-        const school = await School.findOne({ schoolCode: schoolCode.toUpperCase() });
-        if (!school) {
-            return res.status(404).json({ message: "School not found" });
-        }
-        
-        const user = await User.findOne({ email, school: school._id });
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
-        
-        if (!user.otp || user.otp !== otp) {
-            return res.status(401).json({ message: "Invalid verification code" });
-        }
-        
-        if (new Date() > user.otpExpires) {
-            return res.status(401).json({ message: "Code expired. Please login again." });
-        }
-        
-        user.otp = null;
-        user.otpExpires = null;
         user.lastLogin = new Date();
         await user.save();
         
         const token = jwt.sign(
-            { 
-                id: user._id, 
-                email: user.email, 
-                name: user.name,
-                role: user.role,
-                schoolId: school._id,
-                schoolCode: school.schoolCode,
-                schoolName: school.name
-            },
+            { id: user._id, email: user.email, name: user.name, role: user.role, schoolId: school._id, schoolCode: school.schoolCode, schoolName: school.name },
             process.env.JWT_SECRET,
-            { expiresIn: "8h" }
+            { expiresIn: "7d" }
         );
         
-        console.log("✅ User logged in:", email, "| School:", school.name);
-        res.json({ 
-            message: "Login successful", 
-            token,
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                school: {
-                    id: school._id,
-                    name: school.name,
-                    code: school.schoolCode
-                }
-            }
-        });
+        res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role, school: { id: school._id, name: school.name, code: school.schoolCode } } });
     } catch (error) {
-        console.error("Verify login OTP error:", error);
-        res.status(500).json({ message: error.message || "Server error" });
+        res.status(500).json({ message: error.message });
     }
 };
 
-// Forgot Password - Step 1
-exports.forgotPassword = async (req, res) => {
+exports.adminLogin = async (req, res) => {
     try {
-        const { email } = req.body;
-        console.log("Password reset requested for:", email);
+        const { email, password } = req.body;
         
-        const user = await User.findOne({ email }).populate("school");
-        if (!user) {
-            return res.status(404).json({ message: "No account found with this email" });
+        const user = await User.findOne({ email, role: "superadmin" });
+        if (!user) return res.status(401).json({ message: "Invalid credentials" });
+        
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
+        
+        const token = jwt.sign(
+            { id: user._id, email: user.email, name: user.name, role: user.role },
+            process.env.JWT_SECRET,
+            { expiresIn: "7d" }
+        );
+        
+        res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// ==================== PROFILE FUNCTIONS ====================
+
+exports.getProfile = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select("-password -resetOtp -resetOtpExpires").populate("school", "name schoolCode");
+        res.json(user);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+exports.updateProfile = async (req, res) => {
+    try {
+        const { name, email, phone } = req.body;
+        const user = await User.findById(req.user.id);
+        if (!user) return res.status(404).json({ message: "User not found" });
+        
+        if (email && email !== user.email) {
+            const existing = await User.findOne({ email, school: user.school, _id: { $ne: user._id } });
+            if (existing) return res.status(400).json({ message: "Email already in use" });
+            user.email = email;
         }
-        
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        user.otp = otp;
-        user.otpExpires = new Date(Date.now() + 10 * 60000);
+        if (name) user.name = name;
+        if (phone) user.phone = phone;
         await user.save();
         
-        // Send password reset OTP with school name
-        const emailSent = await sendPasswordResetOTP(email, otp, user.name, user.school?.name);
-        if (!emailSent) {
-            return res.status(500).json({ message: "Failed to send reset code" });
-        }
-        
-        console.log("📧 Password reset OTP sent to:", email);
-        res.json({ 
-            message: "Password reset code sent to your email",
-            email: email
-        });
+        res.json({ message: "Profile updated", user: { id: user._id, name: user.name, email: user.email, phone: user.phone, role: user.role } });
     } catch (error) {
-        console.error("Forgot password error:", error);
-        res.status(500).json({ message: error.message || "Server error" });
+        res.status(500).json({ message: error.message });
     }
 };
 
-// Verify Password Reset OTP - Step 2
-exports.verifyResetOtp = async (req, res) => {
+// Setup security questions for recovery
+exports.setupSecurity = async (req, res) => {
     try {
-        const { email, otp } = req.body;
-        console.log("Verifying password reset OTP for:", email);
+        const { securityQuestion, securityAnswer } = req.body;
+        const user = await User.findById(req.user.id);
+        if (!user) return res.status(404).json({ message: "User not found" });
+        
+        user.securityQuestion = securityQuestion;
+        user.securityAnswer = securityAnswer.toLowerCase().trim();
+        await user.save();
+        
+        res.json({ message: "Security questions saved successfully" });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+exports.changePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        if (!currentPassword || !newPassword) return res.status(400).json({ message: "All fields required" });
+        if (newPassword.length < 6) return res.status(400).json({ message: "Password must be at least 6 characters" });
+        
+        const user = await User.findById(req.user.id);
+        if (!user) return res.status(404).json({ message: "User not found" });
+        
+        const isMatch = await bcrypt.compare(currentPassword, user.password);
+        if (!isMatch) return res.status(401).json({ message: "Current password incorrect" });
+        
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(newPassword, salt);
+        await user.save();
+        
+        res.json({ message: "Password changed successfully" });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// ==================== FORGOT SCHOOL CODE - SELF RECOVERY ====================
+
+// Step 1: Request school code recovery via phone or security question
+exports.requestSchoolCodeRecovery = async (req, res) => {
+    try {
+        const { email, phone } = req.body;
+        
+        let user;
+        if (email) {
+            user = await User.findOne({ email }).populate("school");
+        } else if (phone) {
+            user = await User.findOne({ phone }).populate("school");
+        }
+        
+        if (!user || !user.school) return res.status(404).json({ message: "No account found" });
+        
+        // Generate recovery token
+        const recoveryToken = generateOTP();
+        user.resetOtp = recoveryToken;
+        user.resetOtpExpires = new Date(Date.now() + 10 * 60000);
+        await user.save();
+        
+        console.log("\n" + "=".repeat(60));
+        console.log(`🏫 SCHOOL CODE RECOVERY REQUEST`);
+        console.log("=".repeat(60));
+        console.log(`User: ${user.name}`);
+        console.log(`Email: ${user.email}`);
+        console.log(`Phone: ${user.phone || "Not set"}`);
+        console.log(`School: ${user.school.name}`);
+        console.log(`School Code: ${user.school.schoolCode}`);
+        console.log(`Verification Token: ${recoveryToken}`);
+        console.log("=".repeat(60) + "\n");
+        
+        // Check if user has security question set
+        const hasSecurity = user.securityQuestion && user.securityAnswer;
+        
+        res.json({ 
+            message: hasSecurity ? "Verification code generated. Check server console." : "Please contact your school administrator for the school code.",
+            requiresSecurityQuestion: hasSecurity,
+            recoveryToken: recoveryToken // For testing only - remove in production
+        });
+    } catch (error) {
+        console.error("Request recovery error:", error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// Step 2: Verify security question answer
+exports.verifySecurityAnswer = async (req, res) => {
+    try {
+        const { email, answer, recoveryToken } = req.body;
+        
+        const user = await User.findOne({ email }).populate("school");
+        if (!user) return res.status(404).json({ message: "User not found" });
+        
+        if (!user.resetOtp || user.resetOtp !== recoveryToken) {
+            return res.status(401).json({ message: "Invalid or expired recovery token" });
+        }
+        
+        if (new Date() > user.resetOtpExpires) {
+            return res.status(401).json({ message: "Recovery token expired. Please request again." });
+        }
+        
+        if (user.securityAnswer !== answer.toLowerCase().trim()) {
+            return res.status(401).json({ message: "Incorrect security answer" });
+        }
+        
+        // Clear recovery token after successful verification
+        user.resetOtp = null;
+        user.resetOtpExpires = null;
+        await user.save();
+        
+        res.json({ 
+            message: "Identity verified successfully",
+            schoolCode: user.school.schoolCode,
+            schoolName: user.school.name
+        });
+    } catch (error) {
+        console.error("Verify security error:", error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// ==================== FORGOT PASSWORD - SELF RESET ====================
+
+// Request password reset (verifies via security question)
+exports.requestPasswordReset = async (req, res) => {
+    try {
+        const { email } = req.body;
         
         const user = await User.findOne({ email });
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
+        if (!user) return res.status(404).json({ message: "No account found with this email" });
+        
+        if (!user.securityQuestion || !user.securityAnswer) {
+            return res.status(400).json({ 
+                message: "Security questions not set. Please contact your school administrator to reset your password.",
+                needsSecuritySetup: true
+            });
         }
         
-        if (!user.otp || user.otp !== otp) {
-            return res.status(401).json({ message: "Invalid verification code" });
-        }
+        // Generate reset token
+        const resetToken = generateOTP();
+        user.resetOtp = resetToken;
+        user.resetOtpExpires = new Date(Date.now() + 10 * 60000);
+        await user.save();
         
-        if (new Date() > user.otpExpires) {
-            return res.status(401).json({ message: "Code expired. Please request again." });
-        }
+        console.log("\n" + "=".repeat(60));
+        console.log(`🔐 PASSWORD RESET REQUEST`);
+        console.log("=".repeat(60));
+        console.log(`User: ${user.name}`);
+        console.log(`Email: ${user.email}`);
+        console.log(`Security Question: ${user.securityQuestion}`);
+        console.log(`Reset Token: ${resetToken}`);
+        console.log("=".repeat(60) + "\n");
         
-        console.log("✅ Password reset OTP verified for:", email);
         res.json({ 
-            message: "Code verified successfully. You can now reset your password.",
-            verified: true
+            message: "Reset token generated. Check server console for verification code.",
+            securityQuestion: user.securityQuestion,
+            resetToken: resetToken // For testing only - remove in production
         });
     } catch (error) {
-        console.error("Verify reset OTP error:", error);
-        res.status(500).json({ message: error.message || "Server error" });
+        console.error("Request reset error:", error);
+        res.status(500).json({ message: error.message });
     }
 };
 
-// Reset Password - Step 3
-exports.resetPassword = async (req, res) => {
+// Verify security answer and reset password
+exports.verifyAndResetPassword = async (req, res) => {
     try {
-        const { email, otp, newPassword } = req.body;
-        console.log("Resetting password for:", email);
+        const { email, answer, resetToken, newPassword } = req.body;
         
         if (!newPassword || newPassword.length < 6) {
             return res.status(400).json({ message: "Password must be at least 6 characters" });
         }
         
         const user = await User.findOne({ email });
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
+        if (!user) return res.status(404).json({ message: "User not found" });
+        
+        if (!user.resetOtp || user.resetOtp !== resetToken) {
+            return res.status(401).json({ message: "Invalid or expired reset token" });
         }
         
-        if (!user.otp || user.otp !== otp) {
-            return res.status(401).json({ message: "Invalid verification code" });
+        if (new Date() > user.resetOtpExpires) {
+            return res.status(401).json({ message: "Reset token expired. Please request again." });
         }
         
-        if (new Date() > user.otpExpires) {
-            return res.status(401).json({ message: "Code expired. Please request again." });
+        if (user.securityAnswer !== answer.toLowerCase().trim()) {
+            return res.status(401).json({ message: "Incorrect security answer" });
         }
         
         const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(newPassword, salt);
-        
-        user.password = hashedPassword;
-        user.otp = null;
-        user.otpExpires = null;
+        user.password = await bcrypt.hash(newPassword, salt);
+        user.resetOtp = null;
+        user.resetOtpExpires = null;
         await user.save();
         
-        console.log("✅ Password reset successfully for:", email);
+        console.log(`\n✅ Password reset successfully for ${email}\n`);
+        
         res.json({ message: "Password reset successfully! Please login with your new password." });
     } catch (error) {
         console.error("Reset password error:", error);
-        res.status(500).json({ message: error.message || "Server error" });
+        res.status(500).json({ message: error.message });
     }
 };
 
-// Forgot School Code
-exports.forgotSchoolCode = async (req, res) => {
+// Legacy forgot password (with security question)
+exports.forgotPassword = async (req, res) => {
     try {
         const { email } = req.body;
-        console.log("School code recovery requested for:", email);
         
-        const user = await User.findOne({ email }).populate("school");
-        if (!user) {
-            return res.status(404).json({ message: "No account found with this email" });
-        }
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ message: "No account found with this email" });
         
-        const emailSent = await sendSchoolCodeRecovery(email, user.school.name, user.school.schoolCode);
-        
-        if (!emailSent) {
-            return res.status(500).json({ message: "Failed to send email" });
-        }
-        
-        console.log("📧 School code sent to:", email);
-        res.json({ message: "School code sent to your email" });
-    } catch (error) {
-        console.error("Forgot school code error:", error);
-        res.status(500).json({ message: error.message || "Server error" });
-    }
-};
-
-// Get user profile
-exports.getProfile = async (req, res) => {
-    try {
-        const user = await User.findById(req.user.id)
-            .select('-password -otp -otpExpires')
-            .populate("school", "name schoolCode email phone address subscription");
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
-        res.json(user);
-    } catch (error) {
-        console.error("Get profile error:", error);
-        res.status(500).json({ message: "Server error" });
-    }
-};
-
-// Update user profile
-exports.updateProfile = async (req, res) => {
-    try {
-        const { name, email } = req.body;
-        
-        const user = await User.findById(req.user.id);
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
-        
-        if (email && email !== user.email) {
-            const existingUser = await User.findOne({ 
-                email, 
-                school: user.school,
-                _id: { $ne: user._id }
+        if (!user.securityQuestion || !user.securityAnswer) {
+            return res.status(400).json({ 
+                message: "Security questions not set. Please login and set up security questions first."
             });
-            if (existingUser) {
-                return res.status(400).json({ message: "Email already in use" });
-            }
-            user.email = email;
         }
         
-        if (name) user.name = name;
+        const otp = generateOTP();
+        user.resetOtp = otp;
+        user.resetOtpExpires = new Date(Date.now() + 10 * 60000);
         await user.save();
         
+        console.log("\n" + "=".repeat(50));
+        console.log(`🔐 PASSWORD RESET OTP for ${email}`);
+        console.log(`OTP: ${otp}`);
+        console.log(`Security Question: ${user.securityQuestion}`);
+        console.log("=".repeat(50) + "\n");
+        
         res.json({ 
-            message: "Profile updated successfully", 
-            user: { id: user._id, name: user.name, email: user.email, role: user.role } 
+            message: "Password reset code generated. Check server console.",
+            securityQuestion: user.securityQuestion,
+            email: email 
         });
     } catch (error) {
-        console.error("Update profile error:", error);
-        res.status(500).json({ message: "Server error" });
+        console.error("Forgot password error:", error);
+        res.status(500).json({ message: error.message });
     }
 };
 
-// Change password (logged in user)
-exports.changePassword = async (req, res) => {
+exports.verifyResetOtp = async (req, res) => {
     try {
-        const { currentPassword, newPassword } = req.body;
+        const { email, otp, securityAnswer } = req.body;
         
-        if (!currentPassword || !newPassword) {
-            return res.status(400).json({ message: "Current password and new password are required" });
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ message: "User not found" });
+        
+        if (!user.resetOtp || user.resetOtp !== otp) {
+            return res.status(401).json({ message: "Invalid verification code" });
         }
         
-        if (newPassword.length < 6) {
-            return res.status(400).json({ message: "New password must be at least 6 characters" });
+        if (new Date() > user.resetOtpExpires) {
+            return res.status(401).json({ message: "Code expired. Please request again." });
         }
         
-        const user = await User.findById(req.user.id);
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
+        if (user.securityAnswer !== securityAnswer?.toLowerCase().trim()) {
+            return res.status(401).json({ message: "Incorrect security answer" });
         }
         
-        const isMatch = await bcrypt.compare(currentPassword, user.password);
-        if (!isMatch) {
-            return res.status(401).json({ message: "Current password is incorrect" });
+        res.json({ message: "Code verified successfully", verified: true });
+    } catch (error) {
+        console.error("Verify reset OTP error:", error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
+exports.resetPassword = async (req, res) => {
+    try {
+        const { email, otp, securityAnswer, newPassword } = req.body;
+        
+        if (!newPassword || newPassword.length < 6) {
+            return res.status(400).json({ message: "Password must be at least 6 characters" });
+        }
+        
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ message: "User not found" });
+        
+        if (!user.resetOtp || user.resetOtp !== otp) {
+            return res.status(401).json({ message: "Invalid verification code" });
+        }
+        
+        if (new Date() > user.resetOtpExpires) {
+            return res.status(401).json({ message: "Code expired. Please request again." });
+        }
+        
+        if (user.securityAnswer !== securityAnswer?.toLowerCase().trim()) {
+            return res.status(401).json({ message: "Incorrect security answer" });
         }
         
         const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(newPassword, salt);
-        
-        user.password = hashedPassword;
+        user.password = await bcrypt.hash(newPassword, salt);
+        user.resetOtp = null;
+        user.resetOtpExpires = null;
         await user.save();
         
-        res.json({ message: "Password changed successfully" });
+        res.json({ message: "Password reset successfully! Please login with your new password." });
     } catch (error) {
-        console.error("Change password error:", error);
-        res.status(500).json({ message: error.message || "Server error" });
+        console.error("Reset password error:", error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// Forgot School Code - Self recovery
+exports.forgotSchoolCode = async (req, res) => {
+    try {
+        const { email, securityAnswer } = req.body;
+        
+        const user = await User.findOne({ email }).populate("school");
+        if (!user || !user.school) return res.status(404).json({ message: "No account found" });
+        
+        if (!user.securityQuestion || !user.securityAnswer) {
+            return res.status(400).json({ message: "Security questions not set. Please contact your school administrator." });
+        }
+        
+        if (user.securityAnswer !== securityAnswer?.toLowerCase().trim()) {
+            return res.status(401).json({ message: "Incorrect security answer" });
+        }
+        
+        console.log("\n" + "=".repeat(50));
+        console.log(`🏫 SCHOOL CODE RECOVERED for ${email}`);
+        console.log(`School: ${user.school.name}`);
+        console.log(`School Code: ${user.school.schoolCode}`);
+        console.log("=".repeat(50) + "\n");
+        
+        res.json({ 
+            message: "School code retrieved successfully",
+            schoolCode: user.school.schoolCode,
+            schoolName: user.school.name
+        });
+    } catch (error) {
+        console.error("Forgot school code error:", error);
+        res.status(500).json({ message: error.message });
     }
 };

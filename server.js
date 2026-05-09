@@ -9,7 +9,6 @@ connectDB();
 
 const app = express();
 
-// CORS configuration
 app.use(cors());
 app.use(express.json());
 
@@ -80,7 +79,7 @@ app.get("/", (req, res) => {
 
 // ==================== API ROUTES ====================
 
-// Existing routes
+// EXISTING ROUTES (ALL PRESERVED)
 app.use("/api/stock", require("./routes/stockRoutes"));
 app.use("/api/categories", require("./routes/categoryRoutes"));
 app.use("/api/items", require("./routes/itemRoutes"));
@@ -94,6 +93,9 @@ app.use("/api/assets", require("./routes/assetRoutes"));
 app.use("/api/cleaning-supplies", require("./routes/cleaningSupplyRoutes"));
 app.use("/api/laboratory", require("./routes/laboratoryRoutes"));
 app.use("/api/library", require("./routes/libraryRoutes"));
+
+// NEW ADMIN ROUTE (ADDED)
+app.use("/api/admin", require("./routes/adminRoutes"));
 
 // ==================== 404 HANDLER ====================
 

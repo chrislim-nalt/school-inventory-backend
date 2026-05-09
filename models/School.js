@@ -2,21 +2,17 @@ const mongoose = require("mongoose");
 
 // Helper function to generate school code
 function generateSchoolCode(name) {
-    let cleanName = name.replace(/[^a-zA-Z]/g, '');
+    const cleanName = name.replace(/[^a-zA-Z]/g, '');
     let namePart = cleanName.substring(0, 3).toUpperCase();
-    while (namePart.length < 3) {
-        namePart = namePart + 'X';
+    if (namePart.length < 3) {
+        namePart = namePart.padEnd(3, 'X');
     }
     const randomNum = Math.floor(Math.random() * 9000 + 1000);
     return `${namePart}${randomNum}`;
 }
 
 const schoolSchema = new mongoose.Schema({
-    name: {
-        type: String,
-        required: true,
-        trim: true,
-    },
+    name: { type: String, required: true, trim: true },
     schoolCode: {
         type: String,
         unique: true,
@@ -26,57 +22,28 @@ const schoolSchema = new mongoose.Schema({
             return generateSchoolCode(this.name);
         }
     },
-    email: {
+    email: { type: String, required: true, lowercase: true },
+    phone: { type: String, default: "" },
+    address: { type: String, default: "" },
+    logo: { type: String, default: "" },
+    status: {
         type: String,
-        required: true,
-        unique: true,
-        lowercase: true,
+        enum: ["pending", "active", "suspended", "rejected"],
+        default: "pending"
     },
-    phone: {
-        type: String,
-        default: "",
-    },
-    address: {
-        type: String,
-        default: "",
-    },
-    logo: {
-        type: String,
-        default: "",
-    },
-    subscription: {
-        plan: {
-            type: String,
-            enum: ["trial", "basic", "premium", "enterprise"],
-            default: "trial",
-        },
-        startDate: {
-            type: Date,
-            default: Date.now,
-        },
-        endDate: {
-            type: Date,
-            default: () => new Date(+new Date() + 30 * 24 * 60 * 60 * 1000),
-        },
-        isActive: {
-            type: Boolean,
-            default: true,
-        },
-    },
+    registeredBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    approvedAt: { type: Date },
+    rejectionReason: { type: String, default: "" },
     settings: {
         allowBorrowing: { type: Boolean, default: true },
         allowStockAlerts: { type: Boolean, default: true },
         maxUsers: { type: Number, default: 10 },
         currency: { type: String, default: "RWF" },
     },
-    isActive: {
-        type: Boolean,
-        default: true,
-    },
-    createdAt: {
-        type: Date,
-        default: Date.now,
-    },
+    createdAt: { type: Date, default: Date.now }
 });
+
+// NO pre-save hook - using default function instead
 
 module.exports = mongoose.model("School", schoolSchema);
