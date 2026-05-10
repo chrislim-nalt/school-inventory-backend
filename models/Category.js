@@ -9,12 +9,16 @@ const categorySchema = new mongoose.Schema(
     displayOrder: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
     // ADD THIS FIELD
-    school: { type: mongoose.Schema.Types.ObjectId, ref: "School", required: true },
+    school: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: "School",
+      // Not required for super admin, but required for school users
+    },
   },
   { timestamps: true }
 );
 
-// Update unique index to include school (name can be same across different schools)
-categorySchema.index({ name: 1, school: 1 }, { unique: true });
+// Create compound unique index for name + school
+categorySchema.index({ name: 1, school: 1 }, { unique: true, partialFilterExpression: { school: { $exists: true } } });
 
 module.exports = mongoose.model("Category", categorySchema);

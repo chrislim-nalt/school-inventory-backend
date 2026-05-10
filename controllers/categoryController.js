@@ -1,10 +1,16 @@
 const Category = require("../models/Category");
 
-// Get all categories (filtered by school)
+// Get all categories (filtered by school - super admin sees all)
 exports.getCategories = async (req, res) => {
   try {
-    const categories = await Category.find({ school: req.user.schoolId })
-      .sort({ createdAt: -1 });
+    let filter = {};
+    
+    // If user is super admin, show all categories (no school filter)
+    if (req.user.role !== "superadmin") {
+      filter.school = req.user.schoolId;
+    }
+    
+    const categories = await Category.find(filter).sort({ createdAt: -1 });
     res.json(categories);
   } catch (error) {
     console.error("Get categories error:", error);
@@ -12,13 +18,17 @@ exports.getCategories = async (req, res) => {
   }
 };
 
-// ADD THIS MISSING FUNCTION - Get single category by ID
+// Get single category by ID
 exports.getCategoryById = async (req, res) => {
   try {
-    const category = await Category.findOne({ 
-      _id: req.params.id, 
-      school: req.user.schoolId 
-    });
+    let filter = { _id: req.params.id };
+    
+    // If user is not super admin, filter by school
+    if (req.user.role !== "superadmin") {
+      filter.school = req.user.schoolId;
+    }
+    
+    const category = await Category.findOne(filter);
     if (!category) {
       return res.status(404).json({ message: "Category not found" });
     }
@@ -29,10 +39,20 @@ exports.getCategoryById = async (req, res) => {
   }
 };
 
-// Create category (automatically adds school ID)
+// Create category
 exports.createCategory = async (req, res) => {
   try {
     const { name, description, categoryType, icon } = req.body;
+    
+    // Super admin cannot create categories (they belong to schools)
+    if (req.user.role === "superadmin") {
+      return res.status(400).json({ message: "Super admin cannot create categories. Please login as a school admin." });
+    }
+    
+    // Check if schoolId exists
+    if (!req.user.schoolId) {
+      return res.status(400).json({ message: "School not found. Please login again." });
+    }
     
     const existingCategory = await Category.findOne({ 
       name, 
@@ -58,11 +78,18 @@ exports.createCategory = async (req, res) => {
   }
 };
 
-// Update category (verify school ownership)
+// Update category
 exports.updateCategory = async (req, res) => {
   try {
+    let filter = { _id: req.params.id };
+    
+    // If user is not super admin, filter by school
+    if (req.user.role !== "superadmin") {
+      filter.school = req.user.schoolId;
+    }
+    
     const category = await Category.findOneAndUpdate(
-      { _id: req.params.id, school: req.user.schoolId },
+      filter,
       req.body,
       { new: true }
     );
@@ -74,13 +101,17 @@ exports.updateCategory = async (req, res) => {
   }
 };
 
-// Delete category (verify school ownership)
+// Delete category
 exports.deleteCategory = async (req, res) => {
   try {
-    const category = await Category.findOneAndDelete({ 
-      _id: req.params.id, 
-      school: req.user.schoolId 
-    });
+    let filter = { _id: req.params.id };
+    
+    // If user is not super admin, filter by school
+    if (req.user.role !== "superadmin") {
+      filter.school = req.user.schoolId;
+    }
+    
+    const category = await Category.findOneAndDelete(filter);
     if (!category) return res.status(404).json({ message: "Category not found" });
     res.json({ message: "Category deleted successfully" });
   } catch (error) {
