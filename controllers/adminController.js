@@ -232,6 +232,77 @@ exports.getUsers = async (req, res) => {
     }
 };
 
+// ========== NEW: Create User (Super Admin) ==========
+exports.createUser = async (req, res) => {
+    try {
+        const { name, email, password, schoolId, role } = req.body;
+        
+        // Validate required fields
+        if (!name || !email || !schoolId) {
+            return res.status(400).json({ 
+                message: "Please provide name, email, and school" 
+            });
+        }
+        
+        // Check if user already exists
+        const existingUser = await User.findOne({ email: email.toLowerCase() });
+        if (existingUser) {
+            return res.status(400).json({ 
+                message: "User with this email already exists" 
+            });
+        }
+        
+        // Check if school exists
+        const school = await School.findById(schoolId);
+        if (!school) {
+            return res.status(404).json({ 
+                message: "School not found" 
+            });
+        }
+        
+        // Generate password if not provided
+        const finalPassword = password || generateStrongPassword();
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(finalPassword, salt);
+        
+        // Create user
+        const user = new User({
+            name: name.trim(),
+            email: email.toLowerCase().trim(),
+            password: hashedPassword,
+            school: schoolId,
+            role: role || "staff",
+            isActive: true,
+            isVerified: true
+        });
+        
+        await user.save();
+        
+        // Return user data (without password)
+        const userResponse = user.toObject();
+        delete userResponse.password;
+        
+        res.status(201).json({
+            success: true,
+            message: "User created successfully!",
+            user: userResponse,
+            credentials: {
+                name: user.name,
+                email: user.email,
+                password: finalPassword,
+                school: school.name,
+                schoolCode: school.schoolCode,
+                role: user.role,
+                loginUrl: process.env.FRONTEND_URL || "http://localhost:5173"
+            }
+        });
+        
+    } catch (error) {
+        console.error("Create user error:", error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // Update user
 exports.updateUserRole = async (req, res) => {
     try {
@@ -242,7 +313,15 @@ exports.updateUserRole = async (req, res) => {
         if (req.body.isActive !== undefined) user.isActive = req.body.isActive;
         await user.save();
         
-        res.json({ message: "User updated", user });
+        const updatedUser = await User.findById(req.params.id)
+            .select("-password")
+            .populate("school", "name schoolCode");
+        
+        res.json({ 
+            success: true,
+            message: "User updated successfully", 
+            user: updatedUser 
+        });
     } catch (error) {
         console.error("Update user error:", error);
         res.status(500).json({ message: error.message });
@@ -252,8 +331,30 @@ exports.updateUserRole = async (req, res) => {
 // Delete user
 exports.deleteUser = async (req, res) => {
     try {
+        const user = await User.findById(req.params.id);
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        
+        // Prevent deleting the last admin of a school
+        const schoolAdminCount = await User.countDocuments({ 
+            school: user.school, 
+            role: "admin",
+            isActive: true
+        });
+        
+        if (user.role === "admin" && schoolAdminCount === 1) {
+            return res.status(400).json({ 
+                message: "Cannot delete the last admin of this school. Please assign another admin first." 
+            });
+        }
+        
         await User.deleteOne({ _id: req.params.id });
-        res.json({ message: "User deleted" });
+        
+        res.json({ 
+            success: true,
+            message: `User "${user.name}" deleted successfully` 
+        });
     } catch (error) {
         console.error("Delete user error:", error);
         res.status(500).json({ message: error.message });
@@ -286,7 +387,7 @@ exports.getDashboardStats = async (req, res) => {
     }
 };
 
-// ========== NEW: Reset user password and return new credentials for sharing ==========
+// Reset user password and return new credentials for sharing
 exports.resetUserPassword = async (req, res) => {
     try {
         const { userId } = req.params;

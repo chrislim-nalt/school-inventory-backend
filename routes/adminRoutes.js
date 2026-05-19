@@ -30,10 +30,11 @@ router.put("/subscriptions/:id", adminController.updateSubscription);
 
 // Users
 router.get("/users", adminController.getUsers);
+router.post("/users", adminController.createUser);  // NEW: Create user route
 router.put("/users/:id", adminController.updateUserRole);
 router.delete("/users/:id", adminController.deleteUser);
 
-// NEW: Reset user password and get new credentials (for Share button)
+// Reset user password and get new credentials (for Share button)
 router.post("/users/:userId/reset-password", adminController.resetUserPassword);
 
 module.exports = router;
