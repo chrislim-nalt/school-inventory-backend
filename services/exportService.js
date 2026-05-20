@@ -1,7 +1,22 @@
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable"; // ← correct named import for v3+
+import "jspdf-autotable"; // side-effect import — patches jsPDF.prototype.autoTable
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
+
+// Bundler-safe autoTable wrapper.
+// The side-effect import above patches doc.autoTable onto the prototype in most
+// bundlers. If for any reason it didn't (tree-shaking edge case), we fall back
+// to a dynamic import of the named export.
+const autoTable = (doc, options) => {
+  if (typeof doc.autoTable === "function") {
+    doc.autoTable(options);
+  } else {
+    // dynamic fallback
+    import("jspdf-autotable").then(({ default: fn }) => {
+      if (typeof fn === "function") fn(doc, options);
+    });
+  }
+};
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
